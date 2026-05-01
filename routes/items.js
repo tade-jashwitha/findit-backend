@@ -32,15 +32,16 @@ router.get("/", async (req, res) => {
     } = req.query;
 
     // Build MongoDB filter object
-    const filter = { status };
+    // Build MongoDB filter object
+    const filter = {};
     if (type) filter.type = type;
     if (category) filter.category = category;
     if (building) filter["location.building"] = new RegExp(building, "i");
 
-    // Full-text search if keyword provided
     if (search) {
-      filter.$text = { $search: search };
+    filter.$text = { $search: search };
     }
+
 
     const skip = (Number(page) - 1) * Number(limit);
 
@@ -125,8 +126,8 @@ router.post(
     try {
       const itemData = {
         ...req.body,
-        location: JSON.parse(req.body.location || "{}"),
-        reward: JSON.parse(req.body.reward || "{}"),
+        location: req.body.location,
+        reward: req.body.reward || {},
         reportedBy: req.user?._id || null,
       };
 
