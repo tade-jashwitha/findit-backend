@@ -11,17 +11,20 @@ connectDB();
 const app = express();
 
 // ── CORS ──────────────────────────────────────────────────────────────
-const allowedOrigins = [
-  "http://localhost:3000",        // local dev
-  "http://localhost:5173",        // Vite dev (if used)
-  process.env.FRONTEND_URL,       // set in Render: e.g. https://your-app.vercel.app
-].filter(Boolean);               // remove undefined if FRONTEND_URL not set
-
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (Postman, curl, mobile apps)
+    // Allow requests with no origin (Postman, curl, mobile apps, Capacitor)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
+
+    const allowed =
+      !origin ||                                        // no-origin (curl, mobile)
+      origin.startsWith("http://localhost") ||          // local dev
+      origin.startsWith("http://127.0.0.1") ||          // local dev alt
+      origin.endsWith(".netlify.app") ||                // any Netlify deploy
+      origin.endsWith(".onrender.com") ||               // Render previews
+      origin === process.env.FRONTEND_URL;              // explicit custom domain
+
+    if (allowed) return callback(null, true);
     callback(new Error(`CORS blocked: ${origin}`));
   },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
