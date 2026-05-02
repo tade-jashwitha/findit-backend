@@ -18,9 +18,22 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: [true, "Password is required"],
+      required: false,          // Optional — Google users have no password
       minlength: [6, "Password must be at least 6 characters"],
-      select: false, // Never return password in queries by default
+      select: false,
+    },
+    picture: {
+      type: String,
+      default: null,            // Google profile photo URL
+    },
+    loginMethod: {
+      type: String,
+      enum: ["email", "google"],
+      default: "email",
+    },
+    lastLogin: {
+      type: Date,
+      default: Date.now,
     },
     role: {
       type: String,
@@ -35,9 +48,9 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ── Hash password before saving ───────────────────────────────────────
+// ── Hash password before saving (only for email/password users) ──────
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+  if (!this.password || !this.isModified("password")) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });

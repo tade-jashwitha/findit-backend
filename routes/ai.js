@@ -28,7 +28,7 @@ router.post("/match", upload.single("image"), async (req, res) => {
 
     // ── Step 2: Ask Claude to describe the item ───────────────────────
     const describeResponse = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-3-5-sonnet-20241022",
       max_tokens: 500,
       messages: [
         {
@@ -86,7 +86,7 @@ Respond ONLY as JSON: {"name":"...","category":"...","colors":[],"brand":"...","
     }));
 
     const rankResponse = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-3-5-sonnet-20241022",
       max_tokens: 1000,
       messages: [
         {
@@ -143,7 +143,7 @@ router.post("/tags", async (req, res) => {
     const { title, description, category } = req.body;
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-3-5-sonnet-20241022",
       max_tokens: 200,
       messages: [
         {

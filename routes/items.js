@@ -87,6 +87,20 @@ router.get("/stats", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+// GET /api/items/my — Get items reported by the logged-in user
+// ═══════════════════════════════════════════════════════════════════════
+router.get("/my", protect, async (req, res) => {
+  try {
+    const items = await Item.find({ reportedBy: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+    res.json({ success: true, data: items });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 // GET /api/items/:id — Single item detail
 // ═══════════════════════════════════════════════════════════════════════
 router.get("/:id", async (req, res) => {
@@ -116,7 +130,7 @@ router.post(
     body("title").trim().notEmpty().isLength({ max: 100 }),
     body("description").trim().notEmpty().isLength({ max: 1000 }),
     body("category").notEmpty(),
-    body("location.building").trim().notEmpty(),
+    body("building").trim().notEmpty(),
     body("date").isISO8601(),
     body("contactEmail").isEmail().normalizeEmail(),
   ],
@@ -125,10 +139,19 @@ router.post(
 
     try {
       const itemData = {
-        ...req.body,
-        location: req.body.location,
-        reward: req.body.reward || {},
-        reportedBy: req.user?._id || null,
+        type:         req.body.type,
+        title:        req.body.title,
+        description:  req.body.description,
+        category:     req.body.category,
+        date:         req.body.date,
+        contactEmail: req.body.contactEmail,
+        contactPhone: req.body.contactPhone || null,
+        location: {
+          building:     req.body.building,
+          specificArea: req.body.specificArea || "",
+        },
+        reward:      req.body.reward ? JSON.parse(req.body.reward) : {},
+        reportedBy:  req.user?._id || null,
       };
 
       // Attach Cloudinary image info if uploaded
