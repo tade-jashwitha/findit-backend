@@ -1,120 +1,139 @@
 # 🔧 CampusFind — Backend API
 
-> **RESTful API for the CampusFind Lost & Found platform**  
-> Built with Node.js · Express · MongoDB Atlas · Deployed on Render
+<div align="center">
 
-![Node](https://img.shields.io/badge/Node.js-18-339933?logo=node.js)
-![Express](https://img.shields.io/badge/Express-4-000000?logo=express)
-![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?logo=mongodb)
-![Render](https://img.shields.io/badge/Deployed-Render-46E3B7)
+![Node.js](https://img.shields.io/badge/Node.js-18-339933?style=for-the-badge&logo=node.js)
+![Express](https://img.shields.io/badge/Express-4-000000?style=for-the-badge&logo=express)
+![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb)
+![Render](https://img.shields.io/badge/Deployed-Render-46E3B7?style=for-the-badge&logo=render)
 
----
+**REST API for the CampusFind Lost & Found platform — powering item reporting, AI matching, claim verification, and Google OAuth.**
 
-## 🌐 Live API
+[🌐 Frontend Repo](https://github.com/tade-jashwitha/findit-frontend) · [🔌 Live API](https://findit-backend-0v6p.onrender.com/api/health)
 
-```
-Base URL: https://findit-backend-0v6p.onrender.com/api
-Health:   https://findit-backend-0v6p.onrender.com/api/health
-```
+</div>
 
 ---
 
 ## ✨ Features
 
-### 🤖 Auto-Match Engine (`utils/matcher.js`)
-- Runs automatically on every new item submission
-- Compares against all opposite-type active items (max 100)
-- 6-signal weighted scoring system:
-  - **Title word overlap** — 30%
-  - **Description word overlap** — 20%
-  - **Category exact match** — 20%
-  - **Location similarity** — 15%
-  - **Date proximity** — 10%
-  - **AI tag overlap** — 5%
-- Stores top 5 matches on both items
-- Creates in-app notifications for matched item owners
-
-### 📩 Claim System
-- `POST /api/items/:id/claim` — Send a claim request with message
-- `PATCH /api/items/:id/claim/:claimId` — Approve / Reject a claim
-- Auto-notifies both parties on every status change
-- Updates item status to `"claimed"` on approval
-
-### 🔔 Notifications System
-- Notification types: `match_found` · `claim_received` · `claim_approved` · `claim_rejected`
-- `GET /api/notifications` — paginated, unread-first
-- `PATCH /api/notifications/read-all` — mark all as read
-
-### 🔐 Auth
-- JWT-based login with `7d` expiry
-- Google OAuth 2.0 (returns JWT, same as email login)
-- Protected routes via `protect` middleware
-- Optional auth via `optionalAuth` for anonymous reports
+| Feature | Description |
+|---|---|
+| 🔐 **JWT Auth** | Email/password registration + Google OAuth via token exchange |
+| 📦 **Item CRUD** | Create, read, update, delete lost & found items |
+| 🤖 **AI Auto-Match** | Automatically matches new items against opposites using keyword scoring |
+| 📸 **Image Upload** | Cloudinary integration via `multer-storage-cloudinary` |
+| 📋 **2-Step Claim Verification** | Finder approves claim → Claimant confirms receipt → "Reunited" |
+| 🔔 **Notifications** | In-app notification system for matches, claims, and reunions |
+| ♾️ **Keep-Alive** | Self-ping every 10 minutes to prevent Render free-tier cold starts |
+| 🌐 **CORS** | Configured for web, Capacitor (native Android), and GitHub Pages |
 
 ---
 
-## 🏗️ Architecture
+## 🚀 Tech Stack
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                EXPRESS APPLICATION                       │
-│                                                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐ │
-│  │  /auth   │  │  /items  │  │   /ai    │  │/notifs │ │
-│  └──────────┘  └──────────┘  └──────────┘  └────────┘ │
-│                      │                                  │
-│         ┌────────────▼──────────────┐                  │
-│         │   utils/matcher.js        │                  │
-│         │   Auto-match engine       │                  │
-│         └───────────────────────────┘                  │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │                Middleware                        │  │
-│  │  CORS · Helmet · Morgan · JWT Auth · Multer      │  │
-│  └──────────────────────────────────────────────────┘  │
-└──────────────────┬──────────────────────────────────────┘
-                   │
-     ┌─────────────┼─────────────┐
-     ▼             ▼             ▼
-┌─────────┐  ┌──────────┐  ┌──────────┐
-│ MongoDB │  │Cloudinary│  │ Gemini   │
-│  Atlas  │  │ (Images) │  │   AI     │
-└─────────┘  └──────────┘  └──────────┘
+Runtime:     Node.js 18
+Framework:   Express 4
+Database:    MongoDB Atlas (via Mongoose)
+Auth:        JWT + bcryptjs + Google OAuth token exchange
+Storage:     Cloudinary (images)
+Deployment:  Render (free tier with keep-alive)
+Validation:  express-validator
 ```
 
 ---
 
-## 📁 Project Structure
+## 📡 API Endpoints
+
+### Auth
+| Method | Route | Description |
+|---|---|---|
+| `POST` | `/api/auth/register` | Register with email & password |
+| `POST` | `/api/auth/login` | Login → returns JWT token |
+| `POST` | `/api/auth/google` | Google OAuth → exchange user info for JWT |
+| `GET`  | `/api/auth/me` | Get current authenticated user |
+
+### Items
+| Method | Route | Description |
+|---|---|---|
+| `GET`    | `/api/items` | Browse items (filters: type, category, search, location) |
+| `GET`    | `/api/items/my` | Get current user's reported items |
+| `GET`    | `/api/items/:id` | Get single item details |
+| `POST`   | `/api/items` | Report a new lost/found item (with image upload) |
+| `PATCH`  | `/api/items/:id/status` | Update item status |
+| `DELETE` | `/api/items/:id` | Delete an item |
+
+### Claim Verification (2-Step)
+| Method | Route | Description |
+|---|---|---|
+| `POST`  | `/api/items/:id/claim` | **Claimant:** Send a claim request with proof message |
+| `PATCH` | `/api/items/:id/claim/:claimId` | **Finder (Step 1):** Approve or reject claim |
+| `PATCH` | `/api/items/:id/claim/:claimId/confirm` | **Claimant (Step 2):** Confirm item received → marks "Reunited" |
+
+### Notifications
+| Method | Route | Description |
+|---|---|---|
+| `GET`   | `/api/notifications` | Get all notifications for current user |
+| `PATCH` | `/api/notifications/:id/read` | Mark a notification as read |
+
+### Health
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/api/health` | Server health check |
+
+---
+
+## 🗂️ Project Structure
 
 ```
 backend/
 ├── config/
-│   └── cloudinary.js         # Multer + Cloudinary upload config
+│   └── cloudinary.js      # Cloudinary + multer upload config
 ├── middleware/
-│   └── auth.js               # JWT protect + optionalAuth
+│   └── auth.js            # JWT protect & optionalAuth middleware
 ├── models/
-│   ├── User.js               # User schema (email + Google)
-│   ├── Item.js               # Item schema with matches[] + claimRequests[]
-│   └── Notification.js       # In-app notification schema
+│   ├── Item.js            # Item schema (with claimRequests & matches)
+│   ├── User.js            # User schema (email/google auth)
+│   └── Notification.js   # Notification schema
 ├── routes/
-│   ├── auth.js               # Register · Login · Google OAuth
-│   ├── items.js              # CRUD + Auto-match + Claims + Smart sort
-│   ├── ai.js                 # Gemini vision + tag generation
-│   └── notifications.js      # Get + Mark read
+│   ├── auth.js            # Auth routes (register, login, google, me)
+│   ├── items.js           # Item CRUD + auto-match + claim verification
+│   ├── notifications.js   # Notification routes
+│   └── ai.js              # AI-powered item match routes
 ├── utils/
-│   └── matcher.js            # 🤖 Item matching engine (no external API)
-├── server.js                 # Express app + CORS + routes
-├── .env                      # Secret keys (not committed)
-└── .env.example              # Template for env setup
+│   ├── matcher.js         # AI scoring logic for item matching
+│   └── keepAlive.js       # Self-ping to prevent Render cold starts
+└── server.js              # Express app setup + CORS + route mounting
 ```
 
 ---
 
-## ⚙️ Environment Variables
+## ⚙️ Setup & Installation
+
+### Prerequisites
+- Node.js 18+
+- MongoDB Atlas account
+- Cloudinary account
+- Google Cloud project with OAuth credentials
+
+### 1. Clone & Install
+
+```bash
+git clone https://github.com/tade-jashwitha/findit-backend.git
+cd findit-backend
+npm install
+```
+
+### 2. Environment Variables
 
 Create a `.env` file:
 
 ```env
+# Server
+PORT=5000
+NODE_ENV=development
+
 # MongoDB
 MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/findit
 
@@ -122,223 +141,91 @@ MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/findit
 JWT_SECRET=your_super_secret_key_here
 JWT_EXPIRES_IN=7d
 
-# Cloudinary (image hosting)
+# Cloudinary
 CLOUDINARY_CLOUD_NAME=your_cloud_name
 CLOUDINARY_API_KEY=your_api_key
 CLOUDINARY_API_SECRET=your_api_secret
 
-# Google Gemini AI
-GEMINI_API_KEY=your_gemini_api_key
+# Frontend URL (for CORS)
+FRONTEND_URL=https://tade-jashwitha.github.io
 
-# Server
-PORT=5000
-NODE_ENV=development
+# Keep-alive (set to the Render service URL in production)
+BACKEND_URL=https://findit-backend-0v6p.onrender.com
 ```
 
----
-
-## 🚀 Local Development
+### 3. Run Locally
 
 ```bash
-# Install dependencies
-npm install
-
-# Start dev server with nodemon
-npm run dev        # http://localhost:5000
-
-# Start production
-npm start
+npm run dev    # Development with nodemon
+npm start      # Production
 ```
 
 ---
 
-## 📡 API Endpoints
+## 🤖 AI Auto-Matching
 
-### 🔐 Auth — `/api/auth`
+When a new item is reported, the system automatically:
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/register` | ❌ | Register with name, email, password |
-| `POST` | `/login` | ❌ | Login → returns `{ token, data: user }` |
-| `POST` | `/google` | ❌ | Google OAuth → returns `{ token, data: user }` |
-| `GET` | `/me` | ✅ JWT | Get current user |
+1. Fetches up to 100 active items of the **opposite type** (lost ↔ found)
+2. Scores each pair using `utils/matcher.js` (0–100% match score)
+3. Saves top matches on both items
+4. Notifies the owner of matched items via in-app notification
 
-**Login Response:**
-```json
-{
-  "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "data": { "_id": "...", "name": "...", "email": "...", "role": "student" }
-}
+**Scoring factors:** title keywords, description keywords, category, location, date proximity, AI tags.
+
+---
+
+## 📋 2-Step Claim Verification
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    CLAIM FLOW                           │
+│                                                         │
+│  1. Claimant sends claim (POST /items/:id/claim)        │
+│     └─► Item owner gets notification                    │
+│                                                         │
+│  2. Finder approves (PATCH /items/:id/claim/:claimId)   │
+│     └─► status: "approved", item.status: "claimed"      │
+│     └─► Claimant gets notification                      │
+│                                                         │
+│  3. Claimant confirms receipt (.../confirm)             │
+│     └─► claim.status: "confirmed"                       │
+│     └─► item.status: "reunited"                         │
+│     └─► Both parties notified 🎉                        │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### 📦 Items — `/api/items`
+## 🌐 CORS Configuration
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `GET` | `/` | ❌ | Browse with filters + smart sort |
-| `GET` | `/stats` | ❌ | Dashboard statistics |
-| `GET` | `/my` | ✅ | My reported items |
-| `GET` | `/:id` | ❌ | Item detail with match data |
-| `POST` | `/` | Optional | Create item → **auto-match runs** |
-| `PATCH` | `/:id/status` | ✅ | Update item status |
-| `DELETE` | `/:id` | ✅ | Delete item (owner/admin) |
-| `POST` | `/:id/claim` | ✅ | Send claim request |
-| `PATCH` | `/:id/claim/:claimId` | ✅ | Approve/reject claim |
-
-**Browse Query Params:**
-```
-?type=lost|found
-?category=Electronics
-?search=water bottle
-?building=library
-?sort=recent|matches
-?page=1&limit=20
-```
-
-**Create Item Response (with auto-match):**
-```json
-{
-  "success": true,
-  "data": { /* created item */ },
-  "matches": [
-    {
-      "item": { "title": "Blue water bottle", "type": "found" },
-      "score": 78,
-      "reasons": ["Similar title", "Same location: Library"]
-    }
-  ],
-  "matchCount": 1
-}
-```
+The API allows requests from:
+- `http://localhost:*` — local development
+- `https://localhost:*` — Capacitor Android WebView
+- `capacitor://` — Capacitor iOS
+- `*.netlify.app` — Netlify deployments
+- `*.onrender.com` — Render preview deployments
+- `*.github.io` — GitHub Pages deployment
+- Custom domain (via `FRONTEND_URL` env var)
 
 ---
 
-### 🤖 AI — `/api/ai`
+## ♾️ Keep-Alive (Render Free Tier)
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `POST` | `/match` | ❌ | Image-based AI item matching |
-| `POST` | `/tags` | ❌ | Generate descriptive tags |
+`utils/keepAlive.js` pings the `/api/health` endpoint every **10 minutes** to prevent Render's free tier from sleeping. This is automatically started in production.
 
 ---
 
-### 🔔 Notifications — `/api/notifications`
+## 🔒 Security
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| `GET` | `/` | ✅ | Get all notifications (unread first) |
-| `PATCH` | `/read-all` | ✅ | Mark all as read |
-| `PATCH` | `/:id/read` | ✅ | Mark one as read |
-
----
-
-## 📊 Data Models
-
-### Item Schema
-```js
-{
-  type:          "lost" | "found",
-  title:         String,
-  description:   String,
-  category:      String,            // Electronics, Keys, etc.
-  location: {
-    building:    String,
-    specificArea: String,
-  },
-  date:          Date,
-  aiTags:        [String],
-  matches: [{                       // 🆕 Auto-match results
-    itemId:      ObjectId,
-    score:       Number,            // 0-100
-    reasons:     [String],
-    matchedAt:   Date,
-  }],
-  claimRequests: [{                 // 🆕 Structured claim flow
-    requesterId: ObjectId,
-    message:     String,
-    status:      "pending" | "approved" | "rejected",
-  }],
-  status:        "active" | "claimed" | "reunited" | "closed",
-  reportedBy:    ObjectId → User,
-  contactEmail:  String,
-}
-```
-
-### Notification Schema
-```js
-{
-  userId:   ObjectId → User,
-  type:     "match_found" | "claim_received" | "claim_approved" | "claim_rejected",
-  message:  String,
-  itemId:   ObjectId → Item,
-  matchId:  ObjectId → Item,
-  read:     Boolean,
-}
-```
+- Passwords hashed with **bcryptjs** (12 rounds)
+- JWT tokens expire in **7 days**
+- All mutation routes protected with `protect` middleware
+- Input validation via **express-validator**
+- Image uploads restricted by file type and size
 
 ---
 
-## 🌍 Render Deployment
+## 📄 License
 
-### Environment Variables (set in Render Dashboard)
-```
-MONGODB_URI        = mongodb+srv://...
-JWT_SECRET         = your_secret
-CLOUDINARY_*       = your_cloudinary_keys
-GEMINI_API_KEY     = your_gemini_key
-NODE_ENV           = production
-PORT               = 10000
-```
-
-### CORS Configuration
-The backend accepts requests from:
-- `http://localhost:3000` (local dev)
-- `*.netlify.app` (all Netlify deployments)
-- Render's own domain
-
----
-
-## 🔌 CORS Setup (`server.js`)
-
-```js
-const allowedOrigins = [
-  "http://localhost:3000",
-  /\.netlify\.app$/,
-];
-
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowedOrigins.some(o =>
-      typeof o === "string" ? o === origin : o.test(origin)
-    )) cb(null, true);
-    else cb(new Error("Not allowed by CORS"));
-  },
-  credentials: true,
-}));
-```
-
----
-
-## 👩‍💻 Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Runtime | Node.js 18 |
-| Framework | Express 4 |
-| Database | MongoDB Atlas (Mongoose) |
-| Authentication | JWT (`jsonwebtoken`) + bcryptjs |
-| File Upload | Multer + Cloudinary |
-| AI | Google Gemini 1.5 Flash |
-| Validation | express-validator |
-| Hosting | Render.com |
-| CI/CD | GitHub → Render auto-deploy |
-
----
-
-## 👥 Team
-
-**CampusFind** — Built for the college lost & found problem.  
-Department Project · 2025–2026
+MIT License — feel free to fork and adapt for your campus!
