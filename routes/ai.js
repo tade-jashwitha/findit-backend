@@ -6,7 +6,11 @@ const Item = require("../models/Item");
 const { upload } = require("../config/cloudinary");
 const axios = require("axios");
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// Guard: warn clearly if key is missing (prevents cryptic 500s)
+if (!process.env.ANTHROPIC_API_KEY) {
+  console.warn("⚠️  ANTHROPIC_API_KEY is not set — AI routes will use fallback mode");
+}
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "dummy" });
 
 // ═══════════════════════════════════════════════════════════════════════
 // POST /api/ai/match — Upload image, get ranked matches
@@ -79,9 +83,9 @@ Respond ONLY as JSON: {"name":"...","category":"...","colors":[],"brand":"...","
       index: i,
       id: c._id,
       title: c.title,
-      description: c.description.substring(0, 200),
+      description: (c.description || "").substring(0, 200),
       category: c.category,
-      location: c.location.building,
+      location: typeof c.location === "object" ? c.location?.building || "" : c.location || "",
       date: c.date,
     }));
 
@@ -139,31 +143,44 @@ Only include items with score >= 30. Sort by score descending.`,
 // POST /api/ai/tags — Generate tags for an item (called on item creation)
 // ═══════════════════════════════════════════════════════════════════════
 router.post("/tags", async (req, res) => {
-  try {
-    const { title, description, category } = req.body;
+  const { title = "", description = "", category = "" } = req.body;
 
+  // Fallback: extract tags from keywords if Claude is unavailable
+  const fallbackTags = [
+    ...new Set(
+      `${title} ${category} ${description}`
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 2)
+        .slice(0, 10)
+    ),
+  ];
+
+  // If no API key, skip Claude and return fallback immediately
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.json({ success: true, tags: fallbackTags, source: "fallback" });
+  }
+
+  try {
     const response = await anthropic.messages.create({
       model: "claude-3-5-sonnet-20241022",
       max_tokens: 200,
       messages: [
         {
           role: "user",
-          content: `Generate 8-10 searchable tags for this lost/found item.
-Title: ${title}
-Category: ${category}
-Description: ${description}
-
-Respond ONLY as JSON array of strings: ["tag1","tag2",...]`,
+          content: `Generate 8-10 searchable tags for this lost/found item.\nTitle: ${title}\nCategory: ${category}\nDescription: ${description}\n\nRespond ONLY as JSON array of strings: ["tag1","tag2",...]`,
         },
       ],
     });
 
     const raw = response.content[0].text;
     const tags = JSON.parse(raw.replace(/```json|```/g, "").trim());
-
-    res.json({ success: true, tags });
+    res.json({ success: true, tags, source: "claude" });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    console.error("[AI/tags] Claude error, using fallback:", err.message);
+    // Degrade gracefully — never 500 on the tags endpoint
+    res.json({ success: true, tags: fallbackTags, source: "fallback" });
   }
 });
 
