@@ -24,6 +24,7 @@ app.use(cors({
       origin.startsWith("ionic://") ||                  // Ionic
       origin.endsWith(".netlify.app") ||                // any Netlify deploy
       origin.endsWith(".onrender.com") ||               // Render previews
+      origin.endsWith(".github.io") ||                  // ✅ GitHub Pages
       origin === process.env.FRONTEND_URL;              // explicit custom domain
 
     if (allowed) return callback(null, true);
