@@ -34,6 +34,51 @@ Expected response:
 
 ---
 
+## 🏗️ Architecture — Where This Backend Fits
+
+```
+                    ┌──────────────────────┐
+                    │   FRONTEND (Netlify)  │
+                    │   React App           │
+                    └──────────┬───────────┘
+                               │ HTTPS API calls
+                               ▼
+         ┌─────────────────────────────────────────┐
+         │           THIS BACKEND (Render)          │
+         │                                         │
+         │  ┌─────────┐  ┌──────────┐  ┌────────┐ │
+         │  │  /auth  │  │  /items  │  │  /ai   │ │
+         │  │ routes  │  │  routes  │  │ routes │ │
+         │  └────┬────┘  └────┬─────┘  └───┬────┘ │
+         │       │            │             │      │
+         │  ┌────▼────────────▼──┐    ┌────▼────┐ │
+         │  │  JWT Middleware     │    │ Gemini  │ │
+         │  │  (checks token on  │    │   AI    │ │
+         │  │  protected routes) │    └─────────┘ │
+         │  └────────────────────┘                │
+         └──────────┬──────────────┬──────────────┘
+                    │              │
+          ┌─────────▼──────┐  ┌───▼──────────┐
+          │  MongoDB Atlas  │  │  Cloudinary  │
+          │  (stores users  │  │  (stores     │
+          │   and items)    │  │   images)    │
+          └─────────────────┘  └──────────────┘
+```
+
+### Request lifecycle example (Reporting a lost item):
+```
+1. User fills out Report form on frontend
+2. Frontend sends POST /api/items with the token in the header
+3. JWT Middleware checks the token → confirms who the user is
+4. Items route validates the form data
+5. Image uploaded to Cloudinary → gets back a URL
+6. Item saved to MongoDB with the Cloudinary URL
+7. Backend responds with the created item
+8. Frontend shows success message
+```
+
+---
+
 ## 🧰 Tech Stack
 
 | Tool | Why it's used |
