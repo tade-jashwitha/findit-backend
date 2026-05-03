@@ -1,310 +1,344 @@
-# 🎒 CampusFind — Backend API
+# 🔧 CampusFind — Backend API
 
-> This is the server-side (backend) for CampusFind — an AI-powered Lost & Found platform for campuses.  
-> It handles user authentication, item storage, image uploads, and AI-powered tag generation.
+> **RESTful API for the CampusFind Lost & Found platform**  
+> Built with Node.js · Express · MongoDB Atlas · Deployed on Render
 
----
-
-## 📌 What does this backend do?
-
-This is a **REST API** — it receives requests from the frontend app and responds with data.
-
-It is responsible for:
-- ✅ Registering and logging in users (email + Google)
-- ✅ Storing lost/found item reports in MongoDB
-- ✅ Uploading item photos to Cloudinary
-- ✅ Generating AI tags using Google Gemini
-- ✅ Protecting private routes using JWT tokens
-- ✅ Returning search/filter results to the frontend
+![Node](https://img.shields.io/badge/Node.js-18-339933?logo=node.js)
+![Express](https://img.shields.io/badge/Express-4-000000?logo=express)
+![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?logo=mongodb)
+![Render](https://img.shields.io/badge/Deployed-Render-46E3B7)
 
 ---
 
 ## 🌐 Live API
 
-**Base URL:** `https://findit-backend-0v6p.onrender.com/api`
-
-Test it's working:
 ```
-GET https://findit-backend-0v6p.onrender.com/api/health
-```
-Expected response:
-```json
-{ "success": true, "message": "FindIt API is running 🎒" }
+Base URL: https://findit-backend-0v6p.onrender.com/api
+Health:   https://findit-backend-0v6p.onrender.com/api/health
 ```
 
 ---
 
-## 🏗️ Architecture — Where This Backend Fits
+## ✨ Features
+
+### 🤖 Auto-Match Engine (`utils/matcher.js`)
+- Runs automatically on every new item submission
+- Compares against all opposite-type active items (max 100)
+- 6-signal weighted scoring system:
+  - **Title word overlap** — 30%
+  - **Description word overlap** — 20%
+  - **Category exact match** — 20%
+  - **Location similarity** — 15%
+  - **Date proximity** — 10%
+  - **AI tag overlap** — 5%
+- Stores top 5 matches on both items
+- Creates in-app notifications for matched item owners
+
+### 📩 Claim System
+- `POST /api/items/:id/claim` — Send a claim request with message
+- `PATCH /api/items/:id/claim/:claimId` — Approve / Reject a claim
+- Auto-notifies both parties on every status change
+- Updates item status to `"claimed"` on approval
+
+### 🔔 Notifications System
+- Notification types: `match_found` · `claim_received` · `claim_approved` · `claim_rejected`
+- `GET /api/notifications` — paginated, unread-first
+- `PATCH /api/notifications/read-all` — mark all as read
+
+### 🔐 Auth
+- JWT-based login with `7d` expiry
+- Google OAuth 2.0 (returns JWT, same as email login)
+- Protected routes via `protect` middleware
+- Optional auth via `optionalAuth` for anonymous reports
+
+---
+
+## 🏗️ Architecture
 
 ```
-                    ┌──────────────────────┐
-                    │   FRONTEND (Netlify)  │
-                    │   React App           │
-                    └──────────┬───────────┘
-                               │ HTTPS API calls
-                               ▼
-         ┌─────────────────────────────────────────┐
-         │           THIS BACKEND (Render)          │
-         │                                         │
-         │  ┌─────────┐  ┌──────────┐  ┌────────┐ │
-         │  │  /auth  │  │  /items  │  │  /ai   │ │
-         │  │ routes  │  │  routes  │  │ routes │ │
-         │  └────┬────┘  └────┬─────┘  └───┬────┘ │
-         │       │            │             │      │
-         │  ┌────▼────────────▼──┐    ┌────▼────┐ │
-         │  │  JWT Middleware     │    │ Gemini  │ │
-         │  │  (checks token on  │    │   AI    │ │
-         │  │  protected routes) │    └─────────┘ │
-         │  └────────────────────┘                │
-         └──────────┬──────────────┬──────────────┘
-                    │              │
-          ┌─────────▼──────┐  ┌───▼──────────┐
-          │  MongoDB Atlas  │  │  Cloudinary  │
-          │  (stores users  │  │  (stores     │
-          │   and items)    │  │   images)    │
-          └─────────────────┘  └──────────────┘
-```
-
-### Request lifecycle example (Reporting a lost item):
-```
-1. User fills out Report form on frontend
-2. Frontend sends POST /api/items with the token in the header
-3. JWT Middleware checks the token → confirms who the user is
-4. Items route validates the form data
-5. Image uploaded to Cloudinary → gets back a URL
-6. Item saved to MongoDB with the Cloudinary URL
-7. Backend responds with the created item
-8. Frontend shows success message
+┌─────────────────────────────────────────────────────────┐
+│                EXPRESS APPLICATION                       │
+│                                                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐ │
+│  │  /auth   │  │  /items  │  │   /ai    │  │/notifs │ │
+│  └──────────┘  └──────────┘  └──────────┘  └────────┘ │
+│                      │                                  │
+│         ┌────────────▼──────────────┐                  │
+│         │   utils/matcher.js        │                  │
+│         │   Auto-match engine       │                  │
+│         └───────────────────────────┘                  │
+│                                                         │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │                Middleware                        │  │
+│  │  CORS · Helmet · Morgan · JWT Auth · Multer      │  │
+│  └──────────────────────────────────────────────────┘  │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+     ┌─────────────┼─────────────┐
+     ▼             ▼             ▼
+┌─────────┐  ┌──────────┐  ┌──────────┐
+│ MongoDB │  │Cloudinary│  │ Gemini   │
+│  Atlas  │  │ (Images) │  │   AI     │
+└─────────┘  └──────────┘  └──────────┘
 ```
 
 ---
 
-## 🧰 Tech Stack
-
-| Tool | Why it's used |
-|------|--------------|
-| **Node.js** | JavaScript runtime for the server |
-| **Express.js** | Web framework — handles routes and requests |
-| **MongoDB Atlas** | Cloud database — stores users and items |
-| **Mongoose** | Makes it easy to work with MongoDB in Node.js |
-| **JWT (jsonwebtoken)** | Creates secure login tokens |
-| **bcryptjs** | Hashes passwords so they're never stored as plain text |
-| **Google Gemini AI** | Generates smart search tags for items |
-| **Cloudinary** | Stores uploaded images in the cloud |
-| **Multer** | Handles file uploads (images) in Express |
-| **express-validator** | Validates form inputs before processing |
-| **dotenv** | Loads secret keys from `.env` file |
-| **Nodemon** | Auto-restarts server when code changes (dev only) |
-| **Render** | Cloud platform that hosts this backend |
-
----
-
-## 📁 Folder Structure Explained
+## 📁 Project Structure
 
 ```
 backend/
-│
-├── server.js               ← App entry point
-│                             Sets up Express, CORS, middleware, and routes
-│
 ├── config/
-│   ├── db.js               ← Connects to MongoDB Atlas using MONGODB_URI
-│   └── cloudinary.js       ← Sets up Cloudinary + Multer for image upload
-│
-├── routes/
-│   ├── auth.js             ← Handles /api/auth/* (register, login, Google, me)
-│   ├── items.js            ← Handles /api/items/* (report, browse, delete, stats)
-│   └── ai.js               ← Handles /api/ai/* (generate tags, image match)
-│
-├── models/
-│   ├── User.js             ← MongoDB schema for users
-│   └── Item.js             ← MongoDB schema for lost/found items
-│
+│   └── cloudinary.js         # Multer + Cloudinary upload config
 ├── middleware/
-│   └── auth.js             ← JWT protect middleware
-│                             Checks the Authorization header before protected routes
-│
-├── .env                    ← Secret environment variables (NOT in git)
-├── .env.example            ← Template showing what variables are needed
-└── package.json            ← Project info + dependencies
+│   └── auth.js               # JWT protect + optionalAuth
+├── models/
+│   ├── User.js               # User schema (email + Google)
+│   ├── Item.js               # Item schema with matches[] + claimRequests[]
+│   └── Notification.js       # In-app notification schema
+├── routes/
+│   ├── auth.js               # Register · Login · Google OAuth
+│   ├── items.js              # CRUD + Auto-match + Claims + Smart sort
+│   ├── ai.js                 # Gemini vision + tag generation
+│   └── notifications.js      # Get + Mark read
+├── utils/
+│   └── matcher.js            # 🤖 Item matching engine (no external API)
+├── server.js                 # Express app + CORS + routes
+├── .env                      # Secret keys (not committed)
+└── .env.example              # Template for env setup
 ```
 
 ---
 
-## 📡 All API Endpoints
+## ⚙️ Environment Variables
 
-### 🔐 Auth Routes — `/api/auth`
+Create a `.env` file:
 
-| Method | Endpoint | Who can use | What it does |
-|--------|----------|-------------|--------------|
-| `POST` | `/register` | Anyone | Create a new account with name, email, password |
-| `POST` | `/login` | Anyone | Login → returns a JWT token + user info |
-| `POST` | `/google` | Anyone | Login/register via Google OAuth (sends name, email, picture) |
-| `GET` | `/me` | Logged-in users only | Returns the current logged-in user's info |
+```env
+# MongoDB
+MONGODB_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/findit
 
-**Login response example:**
+# JWT
+JWT_SECRET=your_super_secret_key_here
+JWT_EXPIRES_IN=7d
+
+# Cloudinary (image hosting)
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+
+# Google Gemini AI
+GEMINI_API_KEY=your_gemini_api_key
+
+# Server
+PORT=5000
+NODE_ENV=development
+```
+
+---
+
+## 🚀 Local Development
+
+```bash
+# Install dependencies
+npm install
+
+# Start dev server with nodemon
+npm run dev        # http://localhost:5000
+
+# Start production
+npm start
+```
+
+---
+
+## 📡 API Endpoints
+
+### 🔐 Auth — `/api/auth`
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/register` | ❌ | Register with name, email, password |
+| `POST` | `/login` | ❌ | Login → returns `{ token, data: user }` |
+| `POST` | `/google` | ❌ | Google OAuth → returns `{ token, data: user }` |
+| `GET` | `/me` | ✅ JWT | Get current user |
+
+**Login Response:**
 ```json
 {
   "success": true,
-  "token": "eyJhbGci...",
-  "data": {
-    "_id": "abc123",
-    "name": "Jashwitha",
-    "email": "jashwitha@campus.edu"
-  }
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "data": { "_id": "...", "name": "...", "email": "...", "role": "student" }
 }
 ```
 
 ---
 
-### 📦 Item Routes — `/api/items`
+### 📦 Items — `/api/items`
 
-| Method | Endpoint | Auth needed | What it does |
-|--------|----------|-------------|--------------|
-| `GET` | `/` | ❌ No | Get all items. Supports query: `?type=lost&category=Electronics&search=bag` |
-| `GET` | `/stats` | ❌ No | Returns `{ lost, found, reunited }` counts for the homepage |
-| `GET` | `/my` | ✅ Yes | Returns only the current user's reported items |
-| `GET` | `/:id` | ❌ No | Get one specific item by its ID |
-| `POST` | `/` | ✅ Yes | Report a new lost/found item (send as `multipart/form-data` with optional image) |
-| `PATCH` | `/:id/status` | ✅ Yes | Update item status to `resolved` or `claimed` |
-| `DELETE` | `/:id` | ✅ Yes | Delete an item (only the owner can do this) |
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/` | ❌ | Browse with filters + smart sort |
+| `GET` | `/stats` | ❌ | Dashboard statistics |
+| `GET` | `/my` | ✅ | My reported items |
+| `GET` | `/:id` | ❌ | Item detail with match data |
+| `POST` | `/` | Optional | Create item → **auto-match runs** |
+| `PATCH` | `/:id/status` | ✅ | Update item status |
+| `DELETE` | `/:id` | ✅ | Delete item (owner/admin) |
+| `POST` | `/:id/claim` | ✅ | Send claim request |
+| `PATCH` | `/:id/claim/:claimId` | ✅ | Approve/reject claim |
 
-**Creating an item — required fields:**
+**Browse Query Params:**
 ```
-title, type (lost/found), category, description, building, date, contactEmail
-Optional: image (file)
+?type=lost|found
+?category=Electronics
+?search=water bottle
+?building=library
+?sort=recent|matches
+?page=1&limit=20
 ```
 
----
-
-### 🤖 AI Routes — `/api/ai`
-
-| Method | Endpoint | What it does |
-|--------|----------|--------------|
-| `POST` | `/tags` | Send `{ title, description, category }` → Gemini returns 8-10 search tags |
-| `POST` | `/match` | Send an image file → Gemini describes it → matches against DB items |
-
-> If `GEMINI_API_KEY` is not set, `/tags` falls back to keyword extraction (never crashes).
-
----
-
-## 🔐 How JWT Middleware Works
-
-Think of it like a **security badge check** at an office:
-
-```
-Protected route request arrives
-        ↓
-JWT Middleware reads the Authorization header:
-  "Bearer eyJhbGciOiJIUzI1NiJ9..."
-        ↓
-Decodes the token using JWT_SECRET
-        ↓
-Finds the user in the database
-        ↓
-Attaches user to req.user
-        ↓
-Route handler runs (now knows who the user is)
-
-If token is missing/invalid → 401 Unauthorized
+**Create Item Response (with auto-match):**
+```json
+{
+  "success": true,
+  "data": { /* created item */ },
+  "matches": [
+    {
+      "item": { "title": "Blue water bottle", "type": "found" },
+      "score": 78,
+      "reasons": ["Similar title", "Same location: Library"]
+    }
+  ],
+  "matchCount": 1
+}
 ```
 
 ---
 
-## 🗄️ Database Models
+### 🤖 AI — `/api/ai`
 
-### User Model
-```
-name         → Full name
-email        → Unique email address
-password     → Hashed (never stored as plain text)
-picture      → Profile photo URL (from Google)
-loginMethod  → "email" or "google"
-role         → "user" or "admin"
-lastLogin    → When they last logged in
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/match` | ❌ | Image-based AI item matching |
+| `POST` | `/tags` | ❌ | Generate descriptive tags |
+
+---
+
+### 🔔 Notifications — `/api/notifications`
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/` | ✅ | Get all notifications (unread first) |
+| `PATCH` | `/read-all` | ✅ | Mark all as read |
+| `PATCH` | `/:id/read` | ✅ | Mark one as read |
+
+---
+
+## 📊 Data Models
+
+### Item Schema
+```js
+{
+  type:          "lost" | "found",
+  title:         String,
+  description:   String,
+  category:      String,            // Electronics, Keys, etc.
+  location: {
+    building:    String,
+    specificArea: String,
+  },
+  date:          Date,
+  aiTags:        [String],
+  matches: [{                       // 🆕 Auto-match results
+    itemId:      ObjectId,
+    score:       Number,            // 0-100
+    reasons:     [String],
+    matchedAt:   Date,
+  }],
+  claimRequests: [{                 // 🆕 Structured claim flow
+    requesterId: ObjectId,
+    message:     String,
+    status:      "pending" | "approved" | "rejected",
+  }],
+  status:        "active" | "claimed" | "reunited" | "closed",
+  reportedBy:    ObjectId → User,
+  contactEmail:  String,
+}
 ```
 
-### Item Model
-```
-title        → Item name (e.g. "Black Sony Earphones")
-type         → "lost" or "found"
-category     → Electronics, Keys, Bags, ID & Cards, etc.
-description  → Detailed description
-location     → { building, specificArea }
-date         → When it was lost/found
-image        → Cloudinary URL (optional)
-contactEmail → How to reach the reporter
-status       → "active", "resolved", or "claimed"
-reportedBy   → Reference to User who reported it
-tags         → AI-generated search tags
+### Notification Schema
+```js
+{
+  userId:   ObjectId → User,
+  type:     "match_found" | "claim_received" | "claim_approved" | "claim_rejected",
+  message:  String,
+  itemId:   ObjectId → Item,
+  matchId:  ObjectId → Item,
+  read:     Boolean,
+}
 ```
 
 ---
 
-## 🚀 How to Run Locally
+## 🌍 Render Deployment
 
-### Prerequisites
-- Node.js v18+ installed
-- MongoDB Atlas account (free tier works)
-- Cloudinary account (free tier works)
-- Google Gemini API key (free at aistudio.google.com)
+### Environment Variables (set in Render Dashboard)
+```
+MONGODB_URI        = mongodb+srv://...
+JWT_SECRET         = your_secret
+CLOUDINARY_*       = your_cloudinary_keys
+GEMINI_API_KEY     = your_gemini_key
+NODE_ENV           = production
+PORT               = 10000
+```
 
-### Steps
+### CORS Configuration
+The backend accepts requests from:
+- `http://localhost:3000` (local dev)
+- `*.netlify.app` (all Netlify deployments)
+- Render's own domain
 
-```bash
-# 1. Clone the repo
-git clone https://github.com/tade-jashwitha/findit-backend.git
-cd findit-backend
+---
 
-# 2. Install packages
-npm install --legacy-peer-deps
+## 🔌 CORS Setup (`server.js`)
 
-# 3. Create .env file (copy from .env.example and fill in values)
-cp .env.example .env
+```js
+const allowedOrigins = [
+  "http://localhost:3000",
+  /\.netlify\.app$/,
+];
 
-# 4. Start the dev server
-npm run dev
-# Runs at http://localhost:5000
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.some(o =>
+      typeof o === "string" ? o === origin : o.test(origin)
+    )) cb(null, true);
+    else cb(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+}));
 ```
 
 ---
 
-## 🔑 All Environment Variables
+## 👩‍💻 Tech Stack
 
-| Variable | What it is | Where to get it |
-|----------|-----------|----------------|
-| `MONGODB_URI` | MongoDB connection string | MongoDB Atlas → Connect → Drivers |
-| `PORT` | Server port (default: 5000) | Set to `5000` |
-| `NODE_ENV` | Environment name | `development` locally, `production` on Render |
-| `JWT_SECRET` | Secret key to sign tokens | Any long random string |
-| `JWT_EXPIRES_IN` | How long tokens last | e.g. `7d` |
-| `GEMINI_API_KEY` | Google Gemini AI key | [aistudio.google.com](https://aistudio.google.com) |
-| `CLOUDINARY_CLOUD_NAME` | Your Cloudinary cloud name | Cloudinary dashboard |
-| `CLOUDINARY_API_KEY` | Cloudinary API key | Cloudinary dashboard |
-| `CLOUDINARY_API_SECRET` | Cloudinary API secret | Cloudinary dashboard |
-| `FRONTEND_URL` | Your Netlify app URL | Needed for CORS |
-
----
-
-## 🌍 How to Deploy on Render
-
-1. Push code to GitHub
-2. Go to [render.com](https://render.com) → New → Web Service
-3. Connect your GitHub repo
-4. Set:
-   - **Start command:** `node server.js`
-   - **Environment:** `Node`
-5. Add all environment variables from the table above
-6. Click Deploy
-
-> ✅ Render auto-redeploys every time you push to `main`
+| Layer | Technology |
+|-------|-----------|
+| Runtime | Node.js 18 |
+| Framework | Express 4 |
+| Database | MongoDB Atlas (Mongoose) |
+| Authentication | JWT (`jsonwebtoken`) + bcryptjs |
+| File Upload | Multer + Cloudinary |
+| AI | Google Gemini 1.5 Flash |
+| Validation | express-validator |
+| Hosting | Render.com |
+| CI/CD | GitHub → Render auto-deploy |
 
 ---
 
-## 🔗 Related
-- **Frontend Repo:** [findit-frontend](https://github.com/tade-jashwitha/findit-frontend)
+## 👥 Team
 
----
-
-## 👩‍💻 Author
-Made by **Jashwitha Tade**
+**CampusFind** — Built for the college lost & found problem.  
+Department Project · 2025–2026
