@@ -272,7 +272,7 @@ router.post("/:id/claim", protect, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// PATCH /api/items/:id/claim/:claimId — Approve or reject a claim
+// PATCH /api/items/:id/claim/:claimId — Approve or reject a claim (Step 1 by Finder)
 // ═══════════════════════════════════════════════════════════════════════
 router.patch("/:id/claim/:claimId", protect, async (req, res) => {
   try {
@@ -284,7 +284,7 @@ router.patch("/:id/claim/:claimId", protect, async (req, res) => {
     const item = await Item.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: "Item not found" });
 
-    // Only owner can approve/reject
+    // Only owner (finder) can approve/reject
     if (item.reportedBy?.toString() !== req.user._id.toString()) {
       return res.status(403).json({ success: false, message: "Not authorized" });
     }
@@ -294,7 +294,7 @@ router.patch("/:id/claim/:claimId", protect, async (req, res) => {
 
     claim.status = status;
 
-    // If approved → mark item as claimed
+    // If approved → mark item as "claimed" (awaiting claimant confirmation = Step 2)
     if (status === "approved") item.status = "claimed";
 
     await item.save();
@@ -304,7 +304,7 @@ router.patch("/:id/claim/:claimId", protect, async (req, res) => {
       userId:  claim.requesterId,
       type:    status === "approved" ? "claim_approved" : "claim_rejected",
       message: status === "approved"
-        ? `✅ Your claim for "${item.title}" was approved! Contact the owner to arrange pickup.`
+        ? `✅ Your claim for "${item.title}" was approved by the finder! Please confirm you received it.`
         : `❌ Your claim for "${item.title}" was rejected.`,
       itemId:  item._id,
     });
@@ -314,6 +314,57 @@ router.patch("/:id/claim/:claimId", protect, async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATCH /api/items/:id/claim/:claimId/confirm — Step 2: Claimant confirms receipt
+// ═══════════════════════════════════════════════════════════════════════
+router.patch("/:id/claim/:claimId/confirm", protect, async (req, res) => {
+  try {
+    const item = await Item.findById(req.params.id).populate("reportedBy", "name email");
+    if (!item) return res.status(404).json({ success: false, message: "Item not found" });
+
+    const claim = item.claimRequests.id(req.params.claimId);
+    if (!claim) return res.status(404).json({ success: false, message: "Claim not found" });
+
+    // Only the claimant can confirm receipt
+    if (claim.requesterId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: "Only the claimant can confirm receipt" });
+    }
+
+    // Claim must be approved first (Step 1 done)
+    if (claim.status !== "approved") {
+      return res.status(400).json({ success: false, message: "Claim must be approved before confirming" });
+    }
+
+    // ✅ Both sides confirmed — mark as fully reunited!
+    claim.status   = "confirmed";
+    item.status    = "reunited";
+    await item.save();
+
+    // Notify the finder that the item has been successfully returned
+    if (item.reportedBy) {
+      await Notification.create({
+        userId:  item.reportedBy._id,
+        type:    "item_reunited",
+        message: `🎉 "${item.title}" has been successfully returned to its owner! Thank you for helping!`,
+        itemId:  item._id,
+      });
+    }
+
+    // Notify the claimant too
+    await Notification.create({
+      userId:  claim.requesterId,
+      type:    "item_reunited",
+      message: `🎉 You have successfully received your item "${item.title}"! Case closed.`,
+      itemId:  item._id,
+    });
+
+    res.json({ success: true, message: "Item marked as reunited!", data: item });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 
 // ═══════════════════════════════════════════════════════════════════════
 // PATCH /api/items/:id/status

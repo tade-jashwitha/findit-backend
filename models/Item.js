@@ -5,7 +5,7 @@ const mongoose = require("mongoose");
 const claimRequestSchema = new mongoose.Schema({
   requesterId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   message:     { type: String, default: "" },
-  status:      { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
+  status:      { type: String, enum: ["pending", "approved", "rejected", "confirmed"], default: "pending" },
   createdAt:   { type: Date, default: Date.now },
 });
 
