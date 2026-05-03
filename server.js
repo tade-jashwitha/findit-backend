@@ -18,9 +18,10 @@ app.use(cors({
 
     const allowed =
       origin.startsWith("http://localhost") ||          // local dev
+      origin.startsWith("https://localhost") ||         // ✅ Capacitor Android Scheme
       origin.startsWith("http://127.0.0.1") ||          // local dev alt
-      origin.startsWith("capacitor://") ||              // ✅ Capacitor APK
-      origin.startsWith("ionic://") ||                  // ✅ Ionic APK
+      origin.startsWith("capacitor://") ||              // Capacitor iOS
+      origin.startsWith("ionic://") ||                  // Ionic
       origin.endsWith(".netlify.app") ||                // any Netlify deploy
       origin.endsWith(".onrender.com") ||               // Render previews
       origin === process.env.FRONTEND_URL;              // explicit custom domain
