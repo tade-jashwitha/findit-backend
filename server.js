@@ -69,8 +69,16 @@ app.use((err, req, res, next) => {
 
 // ── Start Server ──────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
+const { startKeepAlive } = require("./utils/keepAlive");
+
 app.listen(PORT, () => {
   console.log(`🚀 FindIt API running on http://localhost:${PORT}`);
   console.log(`📦 Environment: ${process.env.NODE_ENV}`);
-  console.log(`🌐 CORS: localhost + *.netlify.app + ${process.env.FRONTEND_URL || "no custom domain"}`);
+  console.log(`🌐 CORS: localhost + *.netlify.app + capacitor:// + ${process.env.FRONTEND_URL || "no custom domain"}`);
+
+  // 🔥 Keep Render awake (ping every 10 min) — only in production
+  if (process.env.NODE_ENV === "production") {
+    startKeepAlive();
+    console.log("✅ Keep-alive started — server will not sleep");
+  }
 });
