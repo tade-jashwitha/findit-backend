@@ -5,10 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "powershell -Command \"Get-Process -Id (Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue).OwningProcess -ErrorAction SilentlyContinue | Stop-Process -Force\"; nodemon server.js"
+    "dev": "nodemon server.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.20.0",
+    "@google/generative-ai": "^0.24.1",
     "axios": "^1.15.2",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.0.0",

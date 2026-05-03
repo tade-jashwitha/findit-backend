@@ -1,16 +1,42 @@
-// routes/ai.js — Claude-powered AI matching
+// routes/ai.js — Gemini-powered AI matching
 const express = require("express");
 const router = express.Router();
-const Anthropic = require("@anthropic-ai/sdk");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Item = require("../models/Item");
 const { upload } = require("../config/cloudinary");
 const axios = require("axios");
 
-// Guard: warn clearly if key is missing (prevents cryptic 500s)
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.warn("⚠️  ANTHROPIC_API_KEY is not set — AI routes will use fallback mode");
+// ── Gemini client ─────────────────────────────────────────────────────
+if (!process.env.GEMINI_API_KEY) {
+  console.warn("⚠️  GEMINI_API_KEY is not set — AI routes will use fallback mode");
 }
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY || "dummy" });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "dummy");
+
+// ── Helper: call Gemini text model ────────────────────────────────────
+async function geminiText(prompt) {
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+// ── Helper: call Gemini vision model (image + text) ───────────────────
+async function geminiVision(prompt, base64Image, mimeType) {
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const result = await model.generateContent([
+    prompt,
+    { inlineData: { data: base64Image, mimeType } },
+  ]);
+  return result.response.text();
+}
+
+// ── Helper: safe JSON parse from LLM response ─────────────────────────
+function safeParseJSON(text, fallback) {
+  try {
+    return JSON.parse(text.replace(/```json|```/g, "").trim());
+  } catch {
+    return fallback;
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // POST /api/ai/match — Upload image, get ranked matches
@@ -21,54 +47,33 @@ router.post("/match", upload.single("image"), async (req, res) => {
       return res.status(400).json({ success: false, message: "Image is required" });
     }
 
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(503).json({ success: false, message: "AI service not configured. Add GEMINI_API_KEY to environment." });
+    }
+
     const imageUrl = req.file.path; // Cloudinary URL
 
-    // ── Step 1: Fetch image as base64 for Claude Vision ──────────────
-    const imageResponse = await axios.get(imageUrl, {
-      responseType: "arraybuffer",
-    });
+    // ── Step 1: Fetch image as base64 for Gemini Vision ──────────────
+    const imageResponse = await axios.get(imageUrl, { responseType: "arraybuffer" });
     const base64Image = Buffer.from(imageResponse.data).toString("base64");
-    const mediaType = req.file.mimetype || "image/jpeg";
+    const mimeType = req.file.mimetype || "image/jpeg";
 
-    // ── Step 2: Ask Claude to describe the item ───────────────────────
-    const describeResponse = await anthropic.messages.create({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 500,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: { type: "base64", media_type: mediaType, data: base64Image },
-            },
-            {
-              type: "text",
-              text: `Analyze this lost/found item image and extract:
+    // ── Step 2: Ask Gemini to describe the item ───────────────────────
+    const describePrompt = `Analyze this lost/found item image and extract:
 1. Item type/name
-2. Category (Electronics/Clothing/Accessories/Books & Notes/ID & Cards/Keys/Bags & Wallets/Sports Equipment/Stationery/Musical Instruments/Glasses & Eyewear/Other)
+2. Category (Electronics/Clothing/Accessories/Books & Notes/ID & Cards/Keys/Bags & Wallets/Sports Equipment/Stationery/Other)
 3. Color(s)
 4. Brand (if visible)
 5. Distinctive features
 6. Condition
 
-Respond ONLY as JSON: {"name":"...","category":"...","colors":[],"brand":"...","features":[],"condition":"...","searchTerms":[]}`,
-            },
-          ],
-        },
-      ],
-    });
+Respond ONLY as JSON: {"name":"...","category":"...","colors":[],"brand":"...","features":[],"condition":"...","searchTerms":[]}`;
 
-    let itemDetails;
-    try {
-      const raw = describeResponse.content[0].text;
-      itemDetails = JSON.parse(raw.replace(/```json|```/g, "").trim());
-    } catch {
-      itemDetails = { searchTerms: [], category: null };
-    }
+    const describeRaw = await geminiVision(describePrompt, base64Image, mimeType);
+    const itemDetails = safeParseJSON(describeRaw, { searchTerms: [], category: null });
 
     // ── Step 3: Fetch candidate items from DB ─────────────────────────
-    const searchType = req.body.searchType || "found"; // Looking for "found" items to match your "lost" item
+    const searchType = req.body.searchType || "found";
     const filter = { type: searchType, status: "active" };
     if (itemDetails.category) filter.category = itemDetails.category;
 
@@ -78,7 +83,7 @@ Respond ONLY as JSON: {"name":"...","category":"...","colors":[],"brand":"...","
       return res.json({ success: true, matches: [], itemDetails });
     }
 
-    // ── Step 4: Ask Claude to rank matches ────────────────────────────
+    // ── Step 4: Ask Gemini to rank matches ────────────────────────────
     const candidateSummaries = candidates.map((c, i) => ({
       index: i,
       id: c._id,
@@ -89,13 +94,7 @@ Respond ONLY as JSON: {"name":"...","category":"...","colors":[],"brand":"...","
       date: c.date,
     }));
 
-    const rankResponse = await anthropic.messages.create({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 1000,
-      messages: [
-        {
-          role: "user",
-          content: `I found/lost an item with these details: ${JSON.stringify(itemDetails)}
+    const rankPrompt = `I found/lost an item with these details: ${JSON.stringify(itemDetails)}
 
 Here are ${candidates.length} candidate items from the database:
 ${JSON.stringify(candidateSummaries, null, 2)}
@@ -104,20 +103,12 @@ Score each candidate from 0-100 based on how likely it matches the uploaded item
 Consider: category match, description similarity, distinctive features.
 
 Respond ONLY as JSON array: [{"index":0,"score":85,"reason":"..."},...]
-Only include items with score >= 30. Sort by score descending.`,
-        },
-      ],
-    });
+Only include items with score >= 30. Sort by score descending.`;
 
-    let scores;
-    try {
-      const raw = rankResponse.content[0].text;
-      scores = JSON.parse(raw.replace(/```json|```/g, "").trim());
-    } catch {
-      scores = [];
-    }
+    const rankRaw = await geminiText(rankPrompt);
+    const scores = safeParseJSON(rankRaw, []);
 
-    // ── Step 5: Build final response with full item data ──────────────
+    // ── Step 5: Build final response ──────────────────────────────────
     const matches = scores
       .filter((s) => s.score >= 30)
       .slice(0, 10)
@@ -127,14 +118,9 @@ Only include items with score >= 30. Sort by score descending.`,
         matchReason: s.reason,
       }));
 
-    res.json({
-      success: true,
-      itemDetails,
-      uploadedImageUrl: imageUrl,
-      matches,
-    });
+    res.json({ success: true, itemDetails, uploadedImageUrl: imageUrl, matches });
   } catch (err) {
-    console.error("AI Match error:", err);
+    console.error("AI Match error:", err.message);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -145,7 +131,7 @@ Only include items with score >= 30. Sort by score descending.`,
 router.post("/tags", async (req, res) => {
   const { title = "", description = "", category = "" } = req.body;
 
-  // Fallback: extract tags from keywords if Claude is unavailable
+  // Fallback: keyword extraction when Gemini is unavailable
   const fallbackTags = [
     ...new Set(
       `${title} ${category} ${description}`
@@ -157,29 +143,24 @@ router.post("/tags", async (req, res) => {
     ),
   ];
 
-  // If no API key, skip Claude and return fallback immediately
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     return res.json({ success: true, tags: fallbackTags, source: "fallback" });
   }
 
   try {
-    const response = await anthropic.messages.create({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 200,
-      messages: [
-        {
-          role: "user",
-          content: `Generate 8-10 searchable tags for this lost/found item.\nTitle: ${title}\nCategory: ${category}\nDescription: ${description}\n\nRespond ONLY as JSON array of strings: ["tag1","tag2",...]`,
-        },
-      ],
-    });
+    const prompt = `Generate 8-10 searchable tags for this lost/found item.
+Title: ${title}
+Category: ${category}
+Description: ${description}
 
-    const raw = response.content[0].text;
-    const tags = JSON.parse(raw.replace(/```json|```/g, "").trim());
-    res.json({ success: true, tags, source: "claude" });
+Respond ONLY as a JSON array of strings: ["tag1","tag2",...]`;
+
+    const raw = await geminiText(prompt);
+    const tags = safeParseJSON(raw, fallbackTags);
+
+    res.json({ success: true, tags, source: "gemini" });
   } catch (err) {
-    console.error("[AI/tags] Claude error, using fallback:", err.message);
-    // Degrade gracefully — never 500 on the tags endpoint
+    console.error("[AI/tags] Gemini error, using fallback:", err.message);
     res.json({ success: true, tags: fallbackTags, source: "fallback" });
   }
 });
