@@ -34,35 +34,22 @@ router.post("/google", async (req, res) => {
     let user = await User.findOne({ email });
 
     if (!user) {
-      // First time Google login — create the user
       user = await User.create({
         name,
         email,
-        picture: picture || null,
+        picture:     picture || null,
         loginMethod: "google",
-        lastLogin: new Date(),
+        lastLogin:   new Date(),
       });
     } else {
-      // Returning user — update their profile & last login
-      user.picture    = picture || user.picture;
-      user.lastLogin  = new Date();
+      user.picture   = picture || user.picture;
+      user.lastLogin = new Date();
       if (!user.loginMethod) user.loginMethod = "google";
       await user.save();
     }
 
-    // Return user data (no JWT — frontend stores user in localStorage)
-    res.json({
-      success: true,
-      data: {
-        _id:         user._id,
-        name:        user.name,
-        email:       user.email,
-        picture:     user.picture,
-        loginMethod: user.loginMethod,
-        role:        user.role,
-        lastLogin:   user.lastLogin,
-      },
-    });
+    // ✅ Return JWT token (same as regular login)
+    sendToken(user, 200, res);
   } catch (err) {
     console.error("Google auth error:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -116,8 +103,10 @@ router.post(
     body("password").notEmpty(),
   ],
   async (req, res) => {
+    console.log("[LOGIN] req.body:", req.body); // 🔍 debug
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log("[LOGIN] Validation errors:", errors.array());
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
