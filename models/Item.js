@@ -1,6 +1,22 @@
 // models/Item.js — Mongoose schema for Lost & Found items
 const mongoose = require("mongoose");
 
+// ── Claim Request sub-schema ───────────────────────────────────────────
+const claimRequestSchema = new mongoose.Schema({
+  requesterId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  message:     { type: String, default: "" },
+  status:      { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
+  createdAt:   { type: Date, default: Date.now },
+});
+
+// ── Match sub-schema ───────────────────────────────────────────────────
+const matchSchema = new mongoose.Schema({
+  itemId:    { type: mongoose.Schema.Types.ObjectId, ref: "Item", required: true },
+  score:     { type: Number, required: true },  // 0–100
+  reasons:   [{ type: String }],
+  matchedAt: { type: Date, default: Date.now },
+});
+
 const itemSchema = new mongoose.Schema(
   {
     // ── Core fields ──────────────────────────────────────────────────
@@ -44,8 +60,8 @@ const itemSchema = new mongoose.Schema(
 
     // ── Location ──────────────────────────────────────────────────────
     location: {
-      building: { type: String, required: true, trim: true },
-      specificArea: { type: String, trim: true }, // e.g. "near the vending machine"
+      building:     { type: String, required: true, trim: true },
+      specificArea: { type: String, trim: true },
     },
 
     // ── Date item was lost/found ───────────────────────────────────────
@@ -56,12 +72,18 @@ const itemSchema = new mongoose.Schema(
 
     // ── Image (stored on Cloudinary) ──────────────────────────────────
     image: {
-      url: { type: String, default: null },
-      publicId: { type: String, default: null }, // Cloudinary public_id for deletion
+      url:      { type: String, default: null },
+      publicId: { type: String, default: null },
     },
 
     // ── AI-generated tags (for matching) ──────────────────────────────
     aiTags: [{ type: String }],
+
+    // ── Auto-match results ────────────────────────────────────────────
+    matches: [matchSchema],
+
+    // ── Claim requests (structured contact flow) ──────────────────────
+    claimRequests: [claimRequestSchema],
 
     // ── Contact & reward ──────────────────────────────────────────────
     contactEmail: {
@@ -73,7 +95,7 @@ const itemSchema = new mongoose.Schema(
     contactPhone: { type: String, default: null },
     reward: {
       offered: { type: Boolean, default: false },
-      amount: { type: Number, default: 0 },
+      amount:  { type: Number,  default: 0 },
     },
 
     // ── Status ────────────────────────────────────────────────────────
@@ -87,11 +109,11 @@ const itemSchema = new mongoose.Schema(
     reportedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      default: null, // null = anonymous report
+      default: null,
     },
   },
   {
-    timestamps: true, // Adds createdAt and updatedAt automatically
+    timestamps: true,
   }
 );
 
@@ -100,6 +122,7 @@ itemSchema.index({ type: 1, status: 1 });
 itemSchema.index({ category: 1 });
 itemSchema.index({ "location.building": 1 });
 itemSchema.index({ date: -1 });
-itemSchema.index({ title: "text", description: "text", aiTags: "text" }); // Full-text search
+itemSchema.index({ "matches.score": -1 });
+itemSchema.index({ title: "text", description: "text", aiTags: "text" });
 
 module.exports = mongoose.model("Item", itemSchema);

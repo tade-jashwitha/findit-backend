@@ -1,10 +1,12 @@
-// routes/items.js — CRUD endpoints for lost & found items
+// routes/items.js — CRUD + Auto-match + Claims + Smart sort
 const express = require("express");
-const router = express.Router();
-const { body, query, validationResult } = require("express-validator");
-const Item = require("../models/Item");
+const router  = express.Router();
+const { body, validationResult } = require("express-validator");
+const Item         = require("../models/Item");
+const Notification = require("../models/Notification");
 const { protect, optionalAuth } = require("../middleware/auth");
 const { upload } = require("../config/cloudinary");
+const { findTopMatches } = require("../utils/matcher");
 
 // ── Helper: send validation errors ────────────────────────────────────
 const validate = (req, res) => {
@@ -16,52 +18,102 @@ const validate = (req, res) => {
   return true;
 };
 
+// ── Helper: run auto-match after item creation ─────────────────────────
+async function runAutoMatch(newItem) {
+  try {
+    const oppositeType = newItem.type === "lost" ? "found" : "lost";
+    const candidates   = await Item.find({
+      type: oppositeType,
+      status: "active",
+      _id: { $ne: newItem._id },
+    }).limit(100);
+
+    const topMatches = findTopMatches(newItem, candidates);
+    if (!topMatches.length) return [];
+
+    // Save matches on the new item
+    newItem.matches = topMatches.map(m => ({
+      itemId:    m.item._id,
+      score:     m.score,
+      reasons:   m.reasons,
+      matchedAt: new Date(),
+    }));
+    await newItem.save();
+
+    // Also save reverse match on each matched item
+    for (const m of topMatches) {
+      await Item.findByIdAndUpdate(m.item._id, {
+        $push: {
+          matches: {
+            itemId:    newItem._id,
+            score:     m.score,
+            reasons:   m.reasons,
+            matchedAt: new Date(),
+          },
+        },
+      });
+
+      // Notify the owner of the matched item (if they have an account)
+      if (m.item.reportedBy) {
+        await Notification.create({
+          userId:  m.item.reportedBy,
+          type:    "match_found",
+          message: `⚡ A possible match was found for your ${m.item.type} item "${m.item.title}" — ${m.score}% confidence!`,
+          itemId:  m.item._id,
+          matchId: newItem._id,
+        });
+      }
+    }
+
+    return topMatches;
+  } catch (err) {
+    console.error("[AutoMatch] error:", err.message);
+    return [];
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════
-// GET /api/items — Browse all items with filters
+// GET /api/items — Browse items with filters + smart sorting
 // ═══════════════════════════════════════════════════════════════════════
 router.get("/", async (req, res) => {
   try {
     const {
-      type,          // "lost" | "found"
-      category,      // e.g. "Electronics"
-      search,        // keyword search
-      building,      // location filter
+      type,
+      category,
+      search,
+      building,
       status = "active",
-      page = 1,
-      limit = 20,
+      sort   = "recent",   // "recent" | "matches"
+      page   = 1,
+      limit  = 20,
     } = req.query;
 
-    // Build MongoDB filter object
-    // Build MongoDB filter object
-    const filter = {};
-    if (type) filter.type = type;
+    const filter = { status };
+    if (type)     filter.type = type;
     if (category) filter.category = category;
     if (building) filter["location.building"] = new RegExp(building, "i");
+    if (search)   filter.$text = { $search: search };
 
-    if (search) {
-    filter.$text = { $search: search };
-    }
-
+    // Smart sort: by recency OR by number/quality of matches
+    const sortObj = sort === "matches"
+      ? { "matches.0.score": -1, createdAt: -1 }
+      : { createdAt: -1 };
 
     const skip = (Number(page) - 1) * Number(limit);
 
     const [items, total] = await Promise.all([
       Item.find(filter)
-        .sort({ createdAt: -1 })
+        .sort(sortObj)
         .skip(skip)
         .limit(Number(limit))
-        .populate("reportedBy", "name email"), // join user info
+        .populate("reportedBy", "name email"),
       Item.countDocuments(filter),
     ]);
 
     res.json({
       success: true,
       data: items,
-      pagination: {
-        total,
-        page: Number(page),
-        pages: Math.ceil(total / Number(limit)),
-      },
+      pagination: { total, page: Number(page), pages: Math.ceil(total / Number(limit)) },
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -69,17 +121,16 @@ router.get("/", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// GET /api/items/stats — Dashboard statistics
+// GET /api/items/stats
 // ═══════════════════════════════════════════════════════════════════════
 router.get("/stats", async (req, res) => {
   try {
     const [total, lost, found, reunited] = await Promise.all([
       Item.countDocuments(),
-      Item.countDocuments({ type: "lost", status: "active" }),
+      Item.countDocuments({ type: "lost",  status: "active" }),
       Item.countDocuments({ type: "found", status: "active" }),
       Item.countDocuments({ status: "reunited" }),
     ]);
-
     res.json({ success: true, data: { total, lost, found, reunited } });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -87,7 +138,7 @@ router.get("/stats", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// GET /api/items/my — Get items reported by the logged-in user
+// GET /api/items/my
 // ═══════════════════════════════════════════════════════════════════════
 router.get("/my", protect, async (req, res) => {
   try {
@@ -101,17 +152,14 @@ router.get("/my", protect, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// GET /api/items/:id — Single item detail
+// GET /api/items/:id
 // ═══════════════════════════════════════════════════════════════════════
 router.get("/:id", async (req, res) => {
   try {
-    const item = await Item.findById(req.params.id).populate(
-      "reportedBy",
-      "name email"
-    );
-    if (!item) {
-      return res.status(404).json({ success: false, message: "Item not found" });
-    }
+    const item = await Item.findById(req.params.id)
+      .populate("reportedBy", "name email")
+      .populate("matches.itemId", "title type category location date image");
+    if (!item) return res.status(404).json({ success: false, message: "Item not found" });
     res.json({ success: true, data: item });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -119,12 +167,12 @@ router.get("/:id", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// POST /api/items — Create new item report
+// POST /api/items — Create item + auto-match
 // ═══════════════════════════════════════════════════════════════════════
 router.post(
   "/",
-  optionalAuth,                          // Attach user if logged in
-  upload.single("image"),               // Handle image upload → Cloudinary
+  optionalAuth,
+  upload.single("image"),
   [
     body("type").isIn(["lost", "found"]),
     body("title").trim().notEmpty().isLength({ max: 100 }),
@@ -150,21 +198,29 @@ router.post(
           building:     req.body.building,
           specificArea: req.body.specificArea || "",
         },
-        reward:      req.body.reward ? JSON.parse(req.body.reward) : {},
-        reportedBy:  req.user?._id || null,
+        reward:     req.body.reward ? JSON.parse(req.body.reward) : {},
+        reportedBy: req.user?._id || null,
       };
 
-      // Attach Cloudinary image info if uploaded
       if (req.file) {
-        itemData.image = {
-          url: req.file.path,
-          publicId: req.file.filename,
-        };
+        itemData.image = { url: req.file.path, publicId: req.file.filename };
       }
 
       const item = await Item.create(itemData);
 
-      res.status(201).json({ success: true, data: item });
+      // 🤖 Run auto-match asynchronously (don't block response)
+      const topMatches = await runAutoMatch(item);
+
+      res.status(201).json({
+        success: true,
+        data: item,
+        matches: topMatches.map(m => ({
+          item:    m.item,
+          score:   m.score,
+          reasons: m.reasons,
+        })),
+        matchCount: topMatches.length,
+      });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message });
     }
@@ -172,7 +228,95 @@ router.post(
 );
 
 // ═══════════════════════════════════════════════════════════════════════
-// PATCH /api/items/:id/status — Update status (e.g. mark as reunited)
+// POST /api/items/:id/claim — Send a claim request
+// ═══════════════════════════════════════════════════════════════════════
+router.post("/:id/claim", protect, async (req, res) => {
+  try {
+    const item = await Item.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: "Item not found" });
+
+    // Can't claim your own item
+    if (item.reportedBy?.toString() === req.user._id.toString()) {
+      return res.status(400).json({ success: false, message: "You cannot claim your own item" });
+    }
+
+    // Check if already requested
+    const already = item.claimRequests.find(
+      c => c.requesterId.toString() === req.user._id.toString() && c.status === "pending"
+    );
+    if (already) {
+      return res.status(400).json({ success: false, message: "You already have a pending claim" });
+    }
+
+    item.claimRequests.push({
+      requesterId: req.user._id,
+      message:     req.body.message || "",
+      status:      "pending",
+    });
+    await item.save();
+
+    // Notify the item owner
+    if (item.reportedBy) {
+      await Notification.create({
+        userId:  item.reportedBy,
+        type:    "claim_received",
+        message: `📩 Someone sent a claim request for your ${item.type} item "${item.title}"`,
+        itemId:  item._id,
+      });
+    }
+
+    res.json({ success: true, message: "Claim request sent" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATCH /api/items/:id/claim/:claimId — Approve or reject a claim
+// ═══════════════════════════════════════════════════════════════════════
+router.patch("/:id/claim/:claimId", protect, async (req, res) => {
+  try {
+    const { status } = req.body; // "approved" | "rejected"
+    if (!["approved", "rejected"].includes(status)) {
+      return res.status(400).json({ success: false, message: "Status must be approved or rejected" });
+    }
+
+    const item = await Item.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, message: "Item not found" });
+
+    // Only owner can approve/reject
+    if (item.reportedBy?.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: "Not authorized" });
+    }
+
+    const claim = item.claimRequests.id(req.params.claimId);
+    if (!claim) return res.status(404).json({ success: false, message: "Claim not found" });
+
+    claim.status = status;
+
+    // If approved → mark item as claimed
+    if (status === "approved") item.status = "claimed";
+
+    await item.save();
+
+    // Notify the claimer
+    await Notification.create({
+      userId:  claim.requesterId,
+      type:    status === "approved" ? "claim_approved" : "claim_rejected",
+      message: status === "approved"
+        ? `✅ Your claim for "${item.title}" was approved! Contact the owner to arrange pickup.`
+        : `❌ Your claim for "${item.title}" was rejected.`,
+      itemId:  item._id,
+    });
+
+    res.json({ success: true, data: item });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PATCH /api/items/:id/status
 // ═══════════════════════════════════════════════════════════════════════
 router.patch("/:id/status", protect, async (req, res) => {
   try {
@@ -190,14 +334,13 @@ router.patch("/:id/status", protect, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
-// DELETE /api/items/:id — Delete item (owner or admin only)
+// DELETE /api/items/:id
 // ═══════════════════════════════════════════════════════════════════════
 router.delete("/:id", protect, async (req, res) => {
   try {
     const item = await Item.findById(req.params.id);
     if (!item) return res.status(404).json({ success: false, message: "Item not found" });
 
-    // Only the reporter or an admin can delete
     if (
       item.reportedBy?.toString() !== req.user._id.toString() &&
       req.user.role !== "admin"
