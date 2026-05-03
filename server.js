@@ -13,13 +13,14 @@ const app = express();
 // ── CORS ──────────────────────────────────────────────────────────────
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (Postman, curl, mobile apps, Capacitor)
+    // Allow requests with no origin (Postman, curl, mobile apps)
     if (!origin) return callback(null, true);
 
     const allowed =
-      !origin ||                                        // no-origin (curl, mobile)
       origin.startsWith("http://localhost") ||          // local dev
       origin.startsWith("http://127.0.0.1") ||          // local dev alt
+      origin.startsWith("capacitor://") ||              // ✅ Capacitor APK
+      origin.startsWith("ionic://") ||                  // ✅ Ionic APK
       origin.endsWith(".netlify.app") ||                // any Netlify deploy
       origin.endsWith(".onrender.com") ||               // Render previews
       origin === process.env.FRONTEND_URL;              // explicit custom domain
