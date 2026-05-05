@@ -7,6 +7,7 @@ const Notification = require("../models/Notification");
 const { protect, optionalAuth } = require("../middleware/auth");
 const { upload } = require("../config/cloudinary");
 const { findTopMatches } = require("../utils/matcher");
+const { extractImageFeatures } = require("../utils/vision");
 
 // ── Helper: send validation errors ────────────────────────────────────
 const validate = (req, res) => {
@@ -204,6 +205,16 @@ router.post(
 
       if (req.file) {
         itemData.image = { url: req.file.path, publicId: req.file.filename };
+        
+        // 🔥 Integrate Computer Vision (AppDeaser / Gemini Placeholder)
+        // This takes the uploaded Cloudinary image and extracts features into tags
+        try {
+          const visionTags = await extractImageFeatures(req.file.path, req.file.mimetype);
+          itemData.aiTags = visionTags;
+          console.log("📸 Vision AI Tags Extracted:", visionTags);
+        } catch (visionErr) {
+          console.error("Vision AI failed, continuing without tags:", visionErr.message);
+        }
       }
 
       const item = await Item.create(itemData);

@@ -17,4 +17,21 @@ const notificationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Mongoose post-save hook to send SMS notification
+notificationSchema.post("save", async function (doc) {
+  try {
+    const User = mongoose.model("User");
+    const user = await User.findById(doc.userId);
+    
+    // Check if user exists and has a phone number
+    if (user && user.phone) {
+      const { sendSMS } = require("../utils/sms");
+      // Prepend "CampusFind: " to the message for context
+      await sendSMS(user.phone, `CampusFind: ${doc.message}`);
+    }
+  } catch (err) {
+    console.error("Error in Notification post-save hook (SMS):", err);
+  }
+});
+
 module.exports = mongoose.model("Notification", notificationSchema);

@@ -135,4 +135,125 @@ router.get("/me", protect, async (req, res) => {
   res.json({ success: true, data: req.user });
 });
 
+// ═══════════════════════════════════════════════════════════════════════
+// PATCH /api/auth/me — Update current user profile
+// ═══════════════════════════════════════════════════════════════════════
+router.patch("/me", protect, async (req, res) => {
+  try {
+    const { name, phone } = req.body;
+    
+    // Create an object with only the fields that were provided
+    const updateFields = {};
+    if (name !== undefined) updateFields.name = name;
+    if (phone !== undefined) updateFields.phone = phone;
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: updateFields },
+      { new: true, runValidators: true }
+    );
+    
+    res.json({ success: true, data: user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+const crypto = require("crypto");
+const sendEmail = require("../utils/sendEmail");
+
+// ═══════════════════════════════════════════════════════════════════════
+// POST /api/auth/forgot-password — Send password reset email
+// ═══════════════════════════════════════════════════════════════════════
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email is required" });
+    }
+    
+    const user = await User.findOne({ email });
+    if (!user) {
+      // Return success even if user not found for security (prevents email enumeration)
+      return res.json({ success: true, message: "If that email is registered, we sent a reset link." });
+    }
+
+    // Generate reset token
+    const resetToken = user.getResetPasswordToken();
+    await user.save({ validateBeforeSave: false });
+
+    // Create reset URL
+    // Point this to the frontend URL! 
+    const resetUrl = `http://localhost:3000/reset-password/${resetToken}`;
+
+    const message = `
+      <h1>Password Reset Request</h1>
+      <p>You requested a password reset for your CampusFind account.</p>
+      <p>Please click the link below to reset your password:</p>
+      <a href="${resetUrl}" target="_blank" style="display:inline-block;padding:10px 20px;background-color:#06B6D4;color:white;text-decoration:none;border-radius:8px;">Reset Password</a>
+      <p>This link is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+    `;
+
+    try {
+      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+         console.warn("[AUTH] EMAIL_USER or EMAIL_PASS not set in .env. Cannot send real email.");
+         console.log(`[AUTH] Reset URL would be: ${resetUrl}`);
+         return res.json({ success: true, message: "If that email is registered, we sent a reset link." });
+      }
+
+      await sendEmail({
+        email: user.email,
+        subject: "CampusFind Password Reset",
+        message,
+      });
+
+      res.json({ success: true, message: "If that email is registered, we sent a reset link." });
+    } catch (err) {
+      console.error("Email send error:", err);
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save({ validateBeforeSave: false });
+      return res.status(500).json({ success: false, message: "Email could not be sent" });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
+// PUT /api/auth/reset-password/:token — Reset the password
+// ═══════════════════════════════════════════════════════════════════════
+router.put("/reset-password/:token", async (req, res) => {
+  try {
+    // Get hashed token
+    const resetPasswordToken = crypto
+      .createHash("sha256")
+      .update(req.params.token)
+      .digest("hex");
+
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: "Invalid or expired reset token" });
+    }
+
+    if (!req.body.password || req.body.password.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    }
+
+    // Set new password
+    user.password = req.body.password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    sendToken(user, 200, res);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;

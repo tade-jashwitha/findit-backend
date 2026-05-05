@@ -61,7 +61,7 @@ function scoreMatch(itemA, itemB) {
   const locScore    = locationScore(itemA.location,  itemB.location);
   const dateScore   = dateProximityScore(itemA.date, itemB.date);
 
-  // AI tag overlap bonus
+  // AI tag overlap bonus (Boosted for Computer Vision)
   const tagsA = (itemA.aiTags || []).map(t => t.toLowerCase());
   const tagsB = new Set((itemB.aiTags || []).map(t => t.toLowerCase()));
   const tagOverlap = tagsA.length
@@ -69,12 +69,12 @@ function scoreMatch(itemA, itemB) {
     : 0;
 
   const raw =
-    titleScore  * 0.30 +
-    descScore   * 0.20 +
+    titleScore  * 0.25 +
+    descScore   * 0.15 +
     categoryMatch * 0.20 +
     locScore    * 0.15 +
     dateScore   * 0.10 +
-    tagOverlap  * 0.05;
+    tagOverlap  * 0.15; // Increased weight for vision features!
 
   return Math.min(Math.round(raw * 100), 99);
 }
@@ -97,6 +97,14 @@ function findTopMatches(newItem, candidates, threshold = 25) {
         reasons.push("Description keywords match");
       if (locationScore(newItem.location, candidate.location) >= 0.7)
         reasons.push(`Same location: ${candidate.location?.building}`);
+        
+      // Check vision tags
+      const tagsA = (newItem.aiTags || []).map(t => t.toLowerCase());
+      const tagsB = new Set((candidate.aiTags || []).map(t => t.toLowerCase()));
+      const overlapCount = tagsA.filter(t => tagsB.has(t)).length;
+      if (overlapCount > 0) {
+        reasons.push(`Matched ${overlapCount} visual feature(s) from image`);
+      }
 
       return { item: candidate, score, reasons };
     })
